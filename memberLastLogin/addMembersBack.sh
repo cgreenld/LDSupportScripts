@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required but not installed. Please install jq first."
+    exit 1
+fi
+
+# Check if curl is installed
+if ! command -v curl &> /dev/null; then
+    echo "Error: curl is required but not installed. Please install curl first."
+    exit 1
+fi
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 -k <api_key> -f <deletion_log_file>"
+    echo "Options:"
+    echo "  -k    LaunchDarkly API key with admin access"
+    echo "  -f    Path to the deletion log JSON file"
+    echo "Example: $0 -k api-123456 -f inactive_members_deletion_20240315_123456.json"
+    exit 1
+}
+
+# Parse command line arguments
+while getopts "k:f:" opt; do
+    case $opt in
+        k) API_KEY="$OPTARG";;
+        f) DELETION_LOG="$OPTARG";;
+        ?) usage;;
+    esac
+done
+
+# Validate required parameters
+if [ -z "$API_KEY" ] || [ -z "$DELETION_LOG" ]; then
+    echo "Error: Both API key and deletion log file are required"
+    usage
+fi
+
+# Check if deletion log file exists
+if [ ! -f "$DELETION_LOG" ]; then
+    echo "Error: Deletion log file '$DELETION_LOG' not found"
+    exit 1
+fi
+
+# API endpoint
+API_URL="https://app.launchdarkly.com/api/v2/members"
+
+# Create a log file for the add-back operation
+ADD_BACK_LOG="add_back_results_$(date +%Y%m%d_%H%M%S).txt"
+echo "Add Back Operation Log - $(date)" > "$ADD_BACK_LOG"
+echo "----------------------------------------" >> "$ADD_BACK_LOG"
+
+# Initialize counters
+total_members=0
+successful_adds=0
+failed_adds=0
+
+# Process each member in the deletion log
+jq -c '.[]' "$DELETION_LOG" | while read -r member; do
+    email=$(echo "$member" | jq -r '.email')
+    role=$(echo "$member" | jq -r '.role')
+    
+    echo "Processing member: $email (Role: $role)" >> "$ADD_BACK_LOG"
+    
+    # Prepare the JSON payload for the API request
+    payload=$(jq -n \
+        --arg email "$email" \
+        --arg role "$role" \
+        '{
+            "email": $email,
+            "role": $role
+        }')
+    
+    # Make the API request to add the member
+    response=$(curl -s -X POST \
+        -H "Authorization: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "$API_URL")
+    
+    # Check if the request was successful
+    if echo "$response" | jq -e '.error' > /dev/null; then
+        error_message=$(echo "$response" | jq -r '.error')
+        echo "Failed to add $email: $error_message" >> "$ADD_BACK_LOG"
+        failed_adds=$((failed_adds + 1))
+    else
+        echo "Successfully added $email with role $role" >> "$ADD_BACK_LOG"
+        successful_adds=$((successful_adds + 1))
+    fi
+    
+    total_members=$((total_members + 1))
+    
+    # Add a small delay to avoid rate limiting
+    sleep 1
+done
+
+# Print summary
+echo "----------------------------------------" >> "$ADD_BACK_LOG"
+echo "Add Back Operation Summary" >> "$ADD_BACK_LOG"
+echo "Total members processed: $total_members" >> "$ADD_BACK_LOG"
+echo "Successfully added: $successful_adds" >> "$ADD_BACK_LOG"
+echo "Failed to add: $failed_adds" >> "$ADD_BACK_LOG"
+
+# Display the results
+echo "Add back operation completed. See $ADD_BACK_LOG for details."
+echo "Summary:"
+echo "Total members processed: $total_members"
+echo "Successfully added: $successful_adds"
+echo "Failed to add: $failed_adds" 
