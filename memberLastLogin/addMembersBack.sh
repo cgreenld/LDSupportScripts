@@ -14,26 +14,34 @@ fi
 
 # Function to display usage
 usage() {
-    echo "Usage: $0 -k <api_key> -f <deletion_log_file>"
+    echo "Usage: $0 -k <api_key> -f <deletion_log_file> -prod <y/n>"
     echo "Options:"
     echo "  -k    LaunchDarkly API key with admin access"
     echo "  -f    Path to the deletion log JSON file"
-    echo "Example: $0 -k api-123456 -f inactive_members_deletion_20240315_123456.json"
+    echo "  -prod Production mode (y/n) - if 'y', will require confirmation for each member"
+    echo "Example: $0 -k api-123456 -f inactive_members_deletion_20240315_123456.json -prod n"
     exit 1
 }
 
 # Parse command line arguments
-while getopts "k:f:" opt; do
+while getopts "k:f:prod:" opt; do
     case $opt in
         k) API_KEY="$OPTARG";;
         f) DELETION_LOG="$OPTARG";;
+        prod) PROD_MODE="$OPTARG";;
         ?) usage;;
     esac
 done
 
 # Validate required parameters
-if [ -z "$API_KEY" ] || [ -z "$DELETION_LOG" ]; then
-    echo "Error: Both API key and deletion log file are required"
+if [ -z "$API_KEY" ] || [ -z "$DELETION_LOG" ] || [ -z "$PROD_MODE" ]; then
+    echo "Error: API key, deletion log file, and production mode are required"
+    usage
+fi
+
+# Validate production mode
+if [ "$PROD_MODE" != "y" ] && [ "$PROD_MODE" != "n" ]; then
+    echo "Error: Production mode must be either 'y' or 'n'"
     usage
 fi
 
@@ -49,12 +57,14 @@ API_URL="https://app.launchdarkly.com/api/v2/members"
 # Create a log file for the add-back operation
 ADD_BACK_LOG="add_back_results_$(date +%Y%m%d_%H%M%S).txt"
 echo "Add Back Operation Log - $(date)" > "$ADD_BACK_LOG"
+echo "Production Mode: $PROD_MODE" >> "$ADD_BACK_LOG"
 echo "----------------------------------------" >> "$ADD_BACK_LOG"
 
 # Initialize counters
 total_members=0
 successful_adds=0
 failed_adds=0
+skipped_members=0
 
 # Process each member in the deletion log
 jq -c '.[]' "$DELETION_LOG" | while read -r member; do
@@ -62,6 +72,16 @@ jq -c '.[]' "$DELETION_LOG" | while read -r member; do
     role=$(echo "$member" | jq -r '.role')
     
     echo "Processing member: $email (Role: $role)" >> "$ADD_BACK_LOG"
+    
+    # If in production mode, ask for confirmation
+    if [ "$PROD_MODE" = "y" ]; then
+        read -p "Add member $email with role $role? (y/n): " confirm
+        if [ "$confirm" != "y" ]; then
+            echo "Skipping member $email" >> "$ADD_BACK_LOG"
+            skipped_members=$((skipped_members + 1))
+            continue
+        fi
+    fi
     
     # Prepare the JSON payload for the API request
     payload=$(jq -n \
@@ -101,10 +121,12 @@ echo "Add Back Operation Summary" >> "$ADD_BACK_LOG"
 echo "Total members processed: $total_members" >> "$ADD_BACK_LOG"
 echo "Successfully added: $successful_adds" >> "$ADD_BACK_LOG"
 echo "Failed to add: $failed_adds" >> "$ADD_BACK_LOG"
+echo "Skipped members: $skipped_members" >> "$ADD_BACK_LOG"
 
 # Display the results
 echo "Add back operation completed. See $ADD_BACK_LOG for details."
 echo "Summary:"
 echo "Total members processed: $total_members"
 echo "Successfully added: $successful_adds"
-echo "Failed to add: $failed_adds" 
+echo "Failed to add: $failed_adds"
+echo "Skipped members: $skipped_members" 

@@ -51,7 +51,7 @@ DAYS_AGO_MS=$(( $(date +%s) * 1000 - DAYS * 24 * 60 * 60 * 1000 ))
 
 # Create output files with timestamp
 OUTPUT_FILE="inactive_members_$(date +%Y%m%d_%H%M%S).txt"
-DELETION_LOG="inactive_members_deletion_$(date +%Y%m%d_%H%M%S).json"
+DELETION_LOG="inactive_members_j$(date +%Y%m%d_%H%M%S).json"
 
 # Initialize variables
 current_url="$API_URL"
@@ -64,7 +64,7 @@ echo "Checking for members who haven't logged in for $DAYS days or more..."
 echo "----------------------------------------"
 
 # Initialize deletion log file with array start
-echo "[" > "$POTENTIAL_DELETION_LOG"
+echo "[" > "$DELETION_LOG"
 
 # Main pagination loop
 while [ $nextPage -eq 1 ]; do
