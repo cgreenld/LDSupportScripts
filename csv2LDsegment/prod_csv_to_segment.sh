@@ -1,33 +1,33 @@
 #!/bin/bash
-# Description: Script to update LaunchDarkly segment via API
+# Description: Script to create approval requests for LaunchDarkly segment updates in production
 
 # Exit on any error
 set -e
 
 # Default values
-ACTION="Add"
+ACTION=""
 environment="production"
-API_KEY="api-07c73f70-29a7-4fc5-8bfe-1fdc04b15d31"
-PROJECT_KEY="cgreen-ld-demo"
-SEGMENT_KEY="test-segment"
-FILE_NAME="test_data.csv"
-PROD_MODE="y"
+API_KEY=""
+PROJECT_KEY=""
+SEGMENT_KEY=""
+FILE_NAME=""
+MEMBER_ID=""
 
 # Help function
 print_usage() {
-  echo "Usage: $0 [-a action] [-e environment] [-p project] [-s segment] [-k api_key] [-f filename] [-prod y/n] [-h]"
+  echo "Usage: $0 [-a action] [-e environment] [-p project] [-s segment] [-k api_key] [-f filename] [-m member_id] [-h]"
   echo "  -a : Action: 'add' or 'remove' (required)"
   echo "  -e : Environment (required)"
   echo "  -p : Project key (required)"
   echo "  -s : Segment key (required)"
   echo "  -k : API key (required)"
   echo "  -f : File Name (required)"
-  echo "  -prod : Production mode (y/n) - if 'y', will require confirmation for each batch"
+  echo "  -m : Member ID to notify (required)"
   echo "  -h : Display this help message"
 }
 
 # Parse command line arguments
-while getopts "a:e:p:s:k:f:prod:h:" flag; do
+while getopts "a:e:p:s:k:f:m:h:" flag; do
   case "${flag}" in
     a) ACTION=${OPTARG};;
     e) environment=${OPTARG};;
@@ -35,7 +35,7 @@ while getopts "a:e:p:s:k:f:prod:h:" flag; do
     s) SEGMENT_KEY=${OPTARG};;
     k) API_KEY=${OPTARG};;
     f) FILE_NAME=${OPTARG};;
-    prod) PROD_MODE=${OPTARG};;
+    m) MEMBER_ID=${OPTARG};;
     h) print_usage
        exit 0;;
     *) print_usage
@@ -51,10 +51,10 @@ echo "Project Key: $PROJECT_KEY"
 echo "Segment Key: $SEGMENT_KEY"
 echo "API Key: $API_KEY"
 echo "File Name: $FILE_NAME"
-echo "Production Mode: $PROD_MODE"
+echo "Member ID: $MEMBER_ID"
 
 # Validate required arguments
-if [ -z "${PROJECT_KEY}" ] || [ -z "${ACTION}" ] || [ -z "${SEGMENT_KEY}" ] || [ -z "${FILE_NAME}" ]; then
+if [ -z "${PROJECT_KEY}" ] || [ -z "${ACTION}" ] || [ -z "${SEGMENT_KEY}" ] || [ -z "${FILE_NAME}" ] || [ -z "${MEMBER_ID}" ]; then
   echo "Error: missing value is are required"
   print_usage
   exit 1
@@ -63,13 +63,6 @@ fi
 # Validate action
 if [ "${ACTION}" != "add" ] && [ "${ACTION}" != "remove" ]; then
   echo "Error: Action must be either 'add' or 'remove'"
-  print_usage
-  exit 1
-fi
-
-# Validate production mode
-if [ "${PROD_MODE}" != "y" ] && [ "${PROD_MODE}" != "n" ]; then
-  echo "Error: Production mode must be either 'y' or 'n'"
   print_usage
   exit 1
 fi
@@ -104,7 +97,6 @@ CLAUSE_ID=$(echo "$segment_info" | jq -r '.rules[0].clauses[0]._id')
 echo "Found Rule ID: $RULE_ID"
 echo "Found Clause ID: $CLAUSE_ID"
 
-
 # Initialize empty array
 IDS=()
 
@@ -129,70 +121,52 @@ for id in "${IDS[@]}"; do
     fi
 done
 
+# Create the resource ID for the segment
+resource_id="proj/${PROJECT_KEY}:env/${environment}:segment/${SEGMENT_KEY}"
 
-# Create JSON payload based on action
-if [ "${ACTION}" == "add" ]; then
-    echo "Adding IDs to segment rule clause..."
-    # Create the JSON array from our IDs
-    json_values="[$array_string]"
-    PAYLOAD=$(cat <<EOF
+# Create the approval request payload
+approval_payload=$(cat <<EOF
 {
-    "comment": "Adding values to clause via script",
+    "resourceId": "$resource_id",
+    "description": "Requesting to ${ACTION} ${#IDS[@]} IDs to segment ${SEGMENT_KEY} in ${environment} environment",
     "instructions": [
         {
-            "kind": "addValuesToClause",
+            "kind": "${ACTION}ValuesToClause",
             "ruleId": "$RULE_ID",
             "clauseId": "$CLAUSE_ID",
             "values": [$array_string]
         }
-    ]
+    ],
+    "notifyMemberIds": ["$MEMBER_ID"]
 }
 EOF
 )
-else
-    echo "Removing IDs from segment rule clause..."
-    PAYLOAD=$(cat <<EOF
-{
-    "comment": "removing values to clause via script",
-    "instructions": [
-        {
-            "kind": "removeValuesFromClause",
-            "ruleId": "$RULE_ID",
-            "clauseId": "$CLAUSE_ID",
-            "values": [$array_string]
-        }
-    ]
-}
-EOF
-)
-fi
 
 # Debug: Show the payload being sent
-echo "Debug - Payload being sent:"
-echo "$PAYLOAD" | jq '.'
+echo "Debug - Approval Request Payload:"
+echo "$approval_payload" | jq '.'
 
-# Make API call
-echo "Making API call to update segment..."
-response=$(curl -s -w "\n%{http_code}" -X PATCH \
-  "https://app.launchdarkly.com/api/v2/segments/$PROJECT_KEY/$environment/$SEGMENT_KEY" \
-  -H "Authorization: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d "$PAYLOAD")
-echo $response
+# Make the approval request API call
+echo "Creating approval request..."
+approval_response=$(curl -s -X POST \
+    "https://app.launchdarkly.com/api/v2/approval-requests" \
+    -H "Authorization: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$approval_payload")
 
-# Get status code from response
-http_code=$(echo "$response" | tail -n1)
-body=$(echo "$response" | sed \$d)
-
-# Check response
-if [ "$http_code" -eq 200 ]; then
-  echo "Successfully updated segment"
-  echo "Response: $body"
-else
-  echo "Error updating segment. Status code: $http_code"
-  echo "Error response: $body"
-  exit 1
+# Check if the approval request was successful
+if echo "$approval_response" | jq -e '.error' > /dev/null; then
+    error_message=$(echo "$approval_response" | jq -r '.error')
+    echo "Error creating approval request: $error_message"
+    exit 1
 fi
 
-echo "Script completed successfully" 
+echo approval_response
+echo "$approval_response"
+
+# Extract and display the approval request ID
+approval_id=$(echo "$approval_response" | jq -r '._id')
+echo "----------------------------------------"
+echo "Approval Request ID: $approval_id"
+echo "Please wait for approval in the LaunchDarkly UI before proceeding with the segment update."
+echo "----------------------------------------" 
