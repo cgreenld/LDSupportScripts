@@ -7,7 +7,6 @@ set -e
 # Default values
 ACTION="Add"
 environment="production"
-API_KEY="api-07c73f70-29a7-4fc5-8bfe-1fdc04b15d31"
 PROJECT_KEY="cgreen-ld-demo"
 SEGMENT_KEY="test-segment"
 FILE_NAME="test_data.csv"
