@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}LD Information - LaunchDarkly Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>LaunchDarkly Configuration</h1>
+        <p class="lead">Dynamic configuration display from LaunchDarkly flags.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">ABC Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div id="configContainer">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading configuration...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.config-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    border-left: 4px solid #007bff;
+    background-color: #f8f9fa;
+}
+
+.config-item.enabled {
+    border-left-color: #28a745;
+    background-color: #d4edda;
+}
+
+.config-item.disabled {
+    border-left-color: #dc3545;
+    background-color: #f8d7da;
+}
+
+.config-label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 4px;
+}
+
+.config-value {
+    font-family: 'Courier New', monospace;
+    background-color: #e9ecef;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.config-description {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 4px;
+}
+
+.error-message {
+    color: #dc3545;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    padding: 12px;
+    margin-top: 16px;
+}
+</style>
+
+<!-- Load LaunchDarkly SDK -->
+<script src="https://unpkg.com/launchdarkly-js-client-sdk@2"></script>
+
+<script>
+console.log("LD Info script starting...");
+
+// Wait for LDClient to be available
+function waitForLDClient() {
+    return new Promise((resolve) => {
+        if (typeof LDClient !== 'undefined') {
+            resolve();
+        } else {
+            const checkInterval = setInterval(() => {
+                if (typeof LDClient !== 'undefined') {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        }
+    });
+}
+
+// Initialize everything once LDClient is available
+async function initializeLDInfo() {
+    await waitForLDClient();
+    console.log("LDClient is available");
+
+    // Initialize the LD client
+    const ldClient = LDClient.initialize('{{ ld_client_id }}', {
+        key: 'user-key',
+        email: 'user@example.com'
+    });
+
+    console.log("LD Client initialized");
+
+    // Function to render configuration
+    function renderConfiguration(config) {
+        const container = document.getElementById('configContainer');
+        
+        if (!config || typeof config !== 'object') {
+            container.innerHTML = `
+                <div class="error-message">
+                    <strong>Error:</strong> Invalid configuration data received from LaunchDarkly.
+                </div>
+            `;
+            return;
+        }
+
+        let html = '<div class="row">';
+        
+        Object.entries(config).forEach(([key, value]) => {
+            const isEnabled = typeof value === 'boolean' ? value : true;
+            const displayValue = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+            
+            html += `
+                <div class="col-md-6 col-lg-4 mb-3">
+                    <div class="config-item ${isEnabled ? 'enabled' : 'disabled'}">
+                        <div class="config-label">${key}</div>
+                        <div class="config-value">${displayValue}</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        container.innerHTML = html;
+        
+        console.log("Configuration rendered:", config);
+    }
+
+    // Function to update configuration
+    function updateConfiguration() {
+        try {
+            const config = ldClient.variation('ABCConfigurationFlag', {"text": "default"});
+            console.log("Retrieved configuration:", config);
+            renderConfiguration(config);
+        } catch (error) {
+            console.error("Error retrieving configuration:", error);
+            document.getElementById('configContainer').innerHTML = `
+                <div class="error-message">
+                    <strong>Error:</strong> Failed to retrieve configuration from LaunchDarkly.
+                    <br>Error: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    // Listen for flag changes
+    ldClient.on('change', (changes) => {
+        console.log("Flag changes detected:", changes);
+        if (changes['ABCConfigurationFlag'] !== undefined) {
+            console.log("ABCConfigurationFlag changed, updating display...");
+            updateConfiguration();
+        }
+    });
+
+    // Initialize when SDK is ready
+    ldClient.waitUntilReady().then(() => {
+        console.log("LD Client is ready - loading configuration");
+        updateConfiguration();
+    }).catch((error) => {
+        console.error("Error waiting for LD client:", error);
+        document.getElementById('configContainer').innerHTML = `
+            <div class="error-message">
+                <strong>Connection Error:</strong> Failed to connect to LaunchDarkly.
+                <br>Error: ${error.message}
+            </div>
+        `;
+    });
+
+    // Add keyboard shortcut for manual refresh (press 'R')
+    document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 'r') {
+            console.log("Manual refresh triggered");
+            updateConfiguration();
+        }
+    });
+}
+
+// Start initialization
+initializeLDInfo().catch(error => {
+    console.error("Failed to initialize LD Info:", error);
+    document.getElementById('configContainer').innerHTML = `
+        <div class="error-message">
+            <strong>Initialization Error:</strong> Failed to initialize the configuration interface.
+            <br>Error: ${error.message}
+        </div>
+    `;
+});
+
+console.log("LD Info script loaded");
+</script>
+{% endblock %} 

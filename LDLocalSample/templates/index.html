@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Home - LaunchDarkly Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Welcome to LaunchDarkly Dashboard</h1>
+        <p class="lead">Select a section from the navigation menu to get started.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Audience</h5>
+                <p class="card-text">Manage and view your audience segments and targeting rules.</p>
+                <a href="/audience" class="btn btn-primary">Go to Audience</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">LD Information</h5>
+                <p class="card-text">View LaunchDarkly configuration and system information.</p>
+                <a href="/ld-info" class="btn btn-primary">View LD Info</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4" id="aiConfigCard" {% if not is_ai_config_enabled %}style="display: none;"{% endif %}>
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">AI Wealth Management</h5>
+                <p class="card-text">AI-powered financial advisory chatbot interface.</p>
+                <a href="/ai-config" class="btn btn-primary">AI Wealth Management</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

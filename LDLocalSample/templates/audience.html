@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}Audience - LaunchDarkly Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Feature Rollout by Instance</h1>
+        <p class="lead">Monitor feature flag rollout across different instances.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Instance Grid</h5>
+                <div class="grid-container" id="instanceGrid">
+                    <!-- Grid will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 8px;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.grid-item {
+    width: 60px;
+    height: 60px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-color: #f8f9fa;
+}
+
+.grid-item.enabled {
+    background-color: #28a745;
+    color: white;
+    border-color: #28a745;
+}
+
+.grid-item.disabled {
+    background-color: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+.grid-item:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.grid-item.enabled:hover {
+    background-color: #218838;
+}
+
+.grid-item.disabled:hover {
+    background-color: #c82333;
+}
+</style>
+
+<!-- Load LaunchDarkly SDK -->
+<script src="https://unpkg.com/launchdarkly-js-client-sdk@2"></script>
+
+<script>
+console.log("Script starting...");
+
+// Wait for LDClient to be available
+function waitForLDClient() {
+    return new Promise((resolve) => {
+        if (typeof LDClient !== 'undefined') {
+            resolve();
+        } else {
+            const checkInterval = setInterval(() => {
+                if (typeof LDClient !== 'undefined') {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        }
+    });
+}
+
+// Create context for each grid item
+function createInstanceContext(instanceId) {
+    return {
+        key: `instance-${instanceId}`,
+        kind: "user",
+        name: `Instance ${instanceId}`,
+        attributes: {
+            instanceId: instanceId.toString(),
+            gridPosition: `${Math.ceil(instanceId/10)},${(instanceId-1)%10 + 1}`,
+            rolloutGroup: "production-instances",
+            row: Math.ceil(instanceId/10),
+            column: (instanceId-1)%10 + 1
+        }
+    };
+}
+
+// Initialize everything once LDClient is available
+async function initializeAudience() {
+    await waitForLDClient();
+    console.log("LDClient is available");
+
+    // Store individual clients for each instance
+    const instanceClients = {};
+    const instanceContexts = {};
+
+    // Function to create grid items
+    function createGridItem(id, isEnabled) {
+        console.log(`Creating grid item ${id} with enabled=${isEnabled}`);
+        const item = document.createElement('div');
+        item.className = `grid-item ${isEnabled ? 'enabled' : 'disabled'}`;
+        item.id = `instance-${id}`;
+        item.textContent = id;
+        item.title = `Instance ${id}: ${isEnabled ? 'Enabled' : 'Disabled'}`;
+        
+        // Add click handler for testing
+        item.addEventListener('click', () => {
+            console.log(`Instance ${id} clicked - Currently ${isEnabled ? 'enabled' : 'disabled'}`);
+            const context = instanceContexts[id];
+            console.log('Instance context:', context);
+        });
+        
+        return item;
+    }
+
+    // Function to create individual client for an instance
+    async function createInstanceClient(instanceId) {
+        const context = createInstanceContext(instanceId);
+        instanceContexts[instanceId] = context;
+        
+        // Create individual client for this instance
+        const client = LDClient.initialize('652800c06c9aa112bf60a340', context);
+        
+        // Wait for client to be ready
+        await client.waitUntilReady();
+        console.log(`Instance ${instanceId} client ready`);
+        
+        // Set up change listener for this specific instance
+        client.on('change', (changes) => {
+            console.log(`Instance ${instanceId} flag changes:`, changes);
+            if (changes['ABCfeatureRollout'] !== undefined) {
+                const isEnabled = changes['ABCfeatureRollout'].current;
+                updateGridItem(instanceId, isEnabled);
+                console.log(`Instance ${instanceId} updated to ${isEnabled ? 'enabled' : 'disabled'}`);
+            }
+        });
+        
+        return client;
+    }
+
+    // Function to populate the grid
+    async function populateGrid() {
+        console.log("populateGrid function called");
+        const gridContainer = document.getElementById('instanceGrid');
+        console.log("Grid container found:", gridContainer);
+        
+        if (!gridContainer) {
+            console.error("Grid container not found!");
+            return;
+        }
+        
+        gridContainer.innerHTML = ''; // Clear existing items
+        console.log("Grid container cleared");
+        
+        // Create individual clients and grid items
+        for (let i = 1; i <= 10; i++) { // 2x5 = 10 items
+            try {
+                // Create individual client for this instance
+                const client = await createInstanceClient(i);
+                instanceClients[i] = client;
+                
+                // Get initial flag state
+                const isFeatureEnabled = client.variation('ABCfeatureRollout', false);
+                console.log(`Instance ${i} initial state: ${isFeatureEnabled}`);
+                
+                // Create grid item
+                const gridItem = createGridItem(i, isFeatureEnabled);
+                gridContainer.appendChild(gridItem);
+                
+            } catch (error) {
+                console.error(`Failed to create client for instance ${i}:`, error);
+                // Fallback: create grid item with default state
+                const gridItem = createGridItem(i, false);
+                gridContainer.appendChild(gridItem);
+            }
+        }
+        
+        console.log("Grid population complete");
+    }
+
+    // Function to update specific grid item
+    function updateGridItem(id, isEnabled) {
+        const item = document.getElementById(`instance-${id}`);
+        if (item) {
+            item.className = `grid-item ${isEnabled ? 'enabled' : 'disabled'}`;
+            item.title = `Instance ${id}: ${isEnabled ? 'Enabled' : 'Disabled'}`;
+            console.log(`Updated instance ${id} to ${isEnabled ? 'enabled' : 'disabled'}`);
+        }
+    }
+
+    // Function to cleanup all clients
+    function cleanupClients() {
+        console.log("Cleaning up all instance clients...");
+        Object.keys(instanceClients).forEach(instanceId => {
+            const client = instanceClients[instanceId];
+            if (client && typeof client.close === 'function') {
+                client.close();
+                console.log(`Closed client for instance ${instanceId}`);
+            }
+        });
+        instanceClients = {};
+        instanceContexts = {};
+    }
+
+    // Initialize the grid
+    populateGrid().catch((error) => {
+        console.error("Error populating grid:", error);
+    });
+
+    // Add some example functionality for testing
+    function logInstanceStates() {
+        console.log("Current instance states:");
+        Object.keys(instanceClients).forEach(instanceId => {
+            const client = instanceClients[instanceId];
+            if (client) {
+                const isEnabled = client.variation('ABCfeatureRollout', false);
+                console.log(`Instance ${instanceId}: ${isEnabled ? 'enabled' : 'disabled'}`);
+            }
+        });
+    }
+
+    // Add keyboard shortcuts for testing
+    document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 't') {
+            logInstanceStates();
+        }
+        if (event.key.toLowerCase() === 's') {
+            console.log("Summary of enabled instances:");
+            let enabledCount = 0;
+            Object.keys(instanceClients).forEach(instanceId => {
+                const client = instanceClients[instanceId];
+                if (client) {
+                    const isEnabled = client.variation('ABCfeatureRollout', false);
+                    if (isEnabled) enabledCount++;
+                }
+            });
+            console.log(`${enabledCount}/10 instances enabled (${(enabledCount/10*100).toFixed(1)}%)`);
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', cleanupClients);
+    
+    // Cleanup on navigation (for SPA-like behavior)
+    window.addEventListener('pagehide', cleanupClients);
+    
+    // Cleanup on visibility change (optional)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            console.log("Page hidden, cleaning up clients");
+            cleanupClients();
+        }
+    });
+
+    // Return cleanup function for manual cleanup if needed
+    return cleanupClients;
+}
+
+// Start initialization
+initializeAudience().catch(error => {
+    console.error("Failed to initialize audience:", error);
+});
+
+console.log("Script loaded completely");
+</script>
+{% endblock %} 

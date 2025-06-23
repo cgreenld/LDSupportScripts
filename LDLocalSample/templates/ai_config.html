@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block title %}AI Config - LaunchDarkly Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Wealth Management Advisor</h1>
+        <p class="lead">AI-powered financial advisory chatbot interface.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">AI Chat Interface</h5>
+            </div>
+            <div class="card-body">
+                <div id="chatContainer" class="chat-container">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message bot-message">
+                            <div class="message-content">
+                                <strong>Wealth Management Advisor:</strong> Hello! I'm your AI financial advisor. How can I help you with your wealth management goals today?
+                            </div>
+                            <div class="message-time">Just now</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <div class="input-group">
+                            <input type="text" id="chatInput" class="form-control" placeholder="Ask about investments, retirement planning, or portfolio management..." maxlength="500">
+                            <button class="btn btn-primary" id="sendButton" type="button">
+                                <i class="fas fa-paper-plane"></i> Send
+                            </button>
+                        </div>
+                        <div class="quick-actions mt-2">
+                            <button class="btn btn-outline-secondary btn-sm quick-action" data-query="What investment strategies do you recommend for retirement?">
+                                Retirement Planning
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm quick-action" data-query="How should I diversify my portfolio?">
+                                Portfolio Diversification
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm quick-action" data-query="What are the current market trends?">
+                                Market Analysis
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.chat-container {
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    max-height: 350px;
+}
+
+.message {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+}
+
+.user-message {
+    align-items: flex-end;
+}
+
+.bot-message {
+    align-items: flex-start;
+}
+
+.message-content {
+    padding: 10px 15px;
+    border-radius: 18px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.user-message .message-content {
+    background-color: #007bff;
+    color: white;
+}
+
+.bot-message .message-content {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    color: #495057;
+}
+
+.message-time {
+    font-size: 11px;
+    color: #6c757d;
+    margin-top: 4px;
+    margin-left: 15px;
+    margin-right: 15px;
+}
+
+.chat-input-container {
+    flex-shrink: 0;
+}
+
+.quick-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.quick-action {
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.typing-indicator {
+    display: none;
+    padding: 10px 15px;
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 18px;
+    max-width: 80%;
+    margin-bottom: 15px;
+}
+
+.typing-dots {
+    display: flex;
+    gap: 4px;
+}
+
+.typing-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #6c757d;
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing {
+    0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+.ai-status {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.ai-status.online {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.ai-status.offline {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+</style>
+
+<!-- Load Font Awesome for icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+<!-- Load LaunchDarkly SDK -->
+<script src="https://unpkg.com/launchdarkly-js-client-sdk@2"></script>
+
+<script>
+console.log("AI Config script starting...");
+
+// Wait for LDClient to be available
+function waitForLDClient() {
+    return new Promise((resolve) => {
+        if (typeof LDClient !== 'undefined') {
+            resolve();
+        } else {
+            const checkInterval = setInterval(() => {
+                if (typeof LDClient !== 'undefined') {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        }
+    });
+}
+
+// Mock responses for the chatbot
+const mockResponses = {
+    "retirement": [
+        "For retirement planning, I recommend a diversified approach with 60% stocks and 40% bonds for moderate risk tolerance. Consider maxing out your 401(k) and IRA contributions.",
+        "Retirement planning should start early. I suggest contributing 15% of your income to retirement accounts and considering target-date funds for automatic rebalancing.",
+        "Your retirement strategy should include both traditional and Roth accounts for tax diversification. Don't forget to factor in healthcare costs in retirement."
+    ],
+    "portfolio": [
+        "Portfolio diversification should include domestic stocks, international stocks, bonds, and alternative investments. Rebalance quarterly to maintain your target allocation.",
+        "A well-diversified portfolio typically includes 70% stocks (domestic and international) and 30% bonds. Consider adding REITs for real estate exposure.",
+        "Diversification reduces risk without sacrificing returns. I recommend spreading investments across different sectors, geographies, and asset classes."
+    ],
+    "market": [
+        "Current market trends show increased volatility due to economic uncertainty. I recommend maintaining a long-term perspective and dollar-cost averaging.",
+        "The market is currently experiencing sector rotation. Technology and healthcare remain strong, while energy and financials show mixed signals.",
+        "Market analysis suggests focusing on quality companies with strong balance sheets and consistent earnings growth, regardless of short-term volatility."
+    ],
+    "default": [
+        "I'd be happy to help you with your financial planning needs. Could you provide more specific details about your goals and current situation?",
+        "That's an interesting question about wealth management. Let me know if you'd like to discuss investment strategies, retirement planning, or portfolio optimization.",
+        "I'm here to assist with your financial advisory needs. What specific aspect of wealth management would you like to explore further?"
+    ]
+};
+
+// Initialize everything once LDClient is available
+async function initializeAIConfig() {
+    await waitForLDClient();
+    console.log("LDClient is available");
+
+    // Initialize the LD client
+    const ldClient = LDClient.initialize('{{ ld_client_id }}', {
+        key: 'user-key',
+        email: 'user@example.com'
+    });
+
+    console.log("LD Client initialized");
+
+    // Chat functionality
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendButton = document.getElementById('sendButton');
+    const quickActions = document.querySelectorAll('.quick-action');
+
+    // Function to add message to chat
+    function addMessage(content, isUser = false) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+        
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                ${isUser ? '<strong>You:</strong> ' : '<strong>Wealth Management Advisor:</strong> '}${content}
+            </div>
+            <div class="message-time">${time}</div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Function to show typing indicator
+    function showTypingIndicator() {
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'typing-indicator';
+        typingDiv.id = 'typingIndicator';
+        typingDiv.innerHTML = `
+            <div class="typing-dots">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+        `;
+        chatMessages.appendChild(typingDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Function to hide typing indicator
+    function hideTypingIndicator() {
+        const typingIndicator = document.getElementById('typingIndicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+    }
+
+    // Function to get mock response
+    function getMockResponse(query) {
+        const lowerQuery = query.toLowerCase();
+        
+        if (lowerQuery.includes('retirement')) {
+            return mockResponses.retirement[Math.floor(Math.random() * mockResponses.retirement.length)];
+        } else if (lowerQuery.includes('portfolio') || lowerQuery.includes('diversif')) {
+            return mockResponses.portfolio[Math.floor(Math.random() * mockResponses.portfolio.length)];
+        } else if (lowerQuery.includes('market') || lowerQuery.includes('trend')) {
+            return mockResponses.market[Math.floor(Math.random() * mockResponses.market.length)];
+        } else {
+            return mockResponses.default[Math.floor(Math.random() * mockResponses.default.length)];
+        }
+    }
+
+    // Function to handle user input
+    function handleUserInput() {
+        const query = chatInput.value.trim();
+        if (!query) return;
+
+        // Add user message
+        addMessage(query, true);
+        chatInput.value = '';
+
+        // Show typing indicator
+        showTypingIndicator();
+
+        // Simulate AI processing delay
+        setTimeout(() => {
+            hideTypingIndicator();
+            
+            // Check if AI is enabled via LaunchDarkly
+            const isAIEnabled = ldClient.variation('ai-config-enabled', false);
+            
+            if (isAIEnabled) {
+                const response = getMockResponse(query);
+                addMessage(response);
+            } else {
+                addMessage("I'm currently offline for maintenance. Please try again later or contact your financial advisor directly.");
+            }
+        }, 1500 + Math.random() * 1000); // Random delay between 1.5-2.5 seconds
+    }
+
+    // Event listeners
+    sendButton.addEventListener('click', handleUserInput);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            handleUserInput();
+        }
+    });
+
+    // Quick action buttons
+    quickActions.forEach(button => {
+        button.addEventListener('click', () => {
+            const query = button.getAttribute('data-query');
+            chatInput.value = query;
+            handleUserInput();
+        });
+    });
+
+    // Update AI status based on flag
+    function updateAIStatus() {
+        const isEnabled = ldClient.variation('ai-config-enabled', false);
+        const statusElement = document.querySelector('.ai-status');
+        
+        if (statusElement) {
+            statusElement.className = `ai-status ${isEnabled ? 'online' : 'offline'}`;
+            statusElement.textContent = isEnabled ? 'AI Online' : 'AI Offline';
+        }
+    }
+
+    // Listen for flag changes
+    ldClient.on('change', (changes) => {
+        console.log("Flag changes detected:", changes);
+        if (changes['ai-config-enabled'] !== undefined) {
+            console.log("AI config flag changed:", changes['ai-config-enabled'].current);
+            updateAIStatus();
+        }
+    });
+
+    // Initialize when SDK is ready
+    ldClient.waitUntilReady().then(() => {
+        console.log("LD Client is ready - initializing AI config");
+        updateAIStatus();
+    }).catch((error) => {
+        console.error("Error waiting for LD client:", error);
+    });
+
+    // Add keyboard shortcut for testing (press 'T' to test AI)
+    document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 't') {
+            console.log("Testing AI response...");
+            chatInput.value = "What investment advice do you have?";
+            handleUserInput();
+        }
+    });
+}
+
+// Start initialization
+initializeAIConfig().catch(error => {
+    console.error("Failed to initialize AI Config:", error);
+});
+
+console.log("AI Config script loaded");
+</script>
+{% endblock %} 
