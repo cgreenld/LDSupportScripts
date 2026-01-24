@@ -14,7 +14,7 @@ app = Flask(__name__)
 #app.config['SECRET_KEY'] = os.urandom(24)
 
 # Initialize LaunchDarkly client
-ldclient.set_config(Config("sdk-454cfea4-bd3b-4de9-a817-4d87fdc2485a"))
+ldclient.set_config(Config(""))
 client = ldclient.get()
 
 context = Context.builder("context-key-123abc").name("Sandy").build()
