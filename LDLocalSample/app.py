@@ -60,4 +60,4 @@ def inject_flag_state():
 
 if __name__ == '__main__':
     logger.info("Starting LDLocalSample application")
-    app.run(debug=True) 
+    app.run(debug=True)
