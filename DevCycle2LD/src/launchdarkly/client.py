@@ -6,6 +6,7 @@ Documentation: https://launchdarkly.com/docs/api
 """
 
 import json
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -36,64 +37,95 @@ class LaunchDarklyClient:
         method: str, 
         path: str, 
         data: Optional[Dict] = None, 
-        content_type: str = 'application/json'
+        content_type: str = 'application/json',
+        max_retries: int = 5,
+        base_delay: float = 1.0
     ) -> Any:
         """
-        Make an API request.
+        Make an API request with rate limit handling.
         
         Args:
             method: HTTP method
             path: API endpoint path
             data: Optional request body data
             content_type: Content-Type header value
+            max_retries: Maximum number of retries on rate limit (429)
+            base_delay: Base delay in seconds for exponential backoff
         
         Returns:
             Response JSON data
         
         Raises:
-            Exception: If API request fails
+            Exception: If API request fails after all retries
         """
         url = f"{self.base_url}{path}"
         headers = {'Content-Type': content_type}
         
-        try:
-            # When using custom content type (like semantic patch), 
-            # we must use data= instead of json= to prevent requests
-            # from overriding our Content-Type header
-            if content_type != 'application/json' and data:
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    data=json.dumps(data)
-                )
-            else:
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    json=data if data else None
-                )
-            response.raise_for_status()
+        for attempt in range(max_retries + 1):
+            try:
+                # When using custom content type (like semantic patch), 
+                # we must use data= instead of json= to prevent requests
+                # from overriding our Content-Type header
+                if content_type != 'application/json' and data:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        data=json.dumps(data)
+                    )
+                else:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        json=data if data else None
+                    )
+                response.raise_for_status()
+                
+                if response.content:
+                    return response.json()
+                return None
             
-            if response.content:
-                return response.json()
-            return None
+            except requests.exceptions.RequestException as e:
+                status_code = None
+                if hasattr(e, 'response') and e.response is not None:
+                    status_code = e.response.status_code
+                
+                # Handle rate limiting (429)
+                if status_code == 429:
+                    if attempt >= max_retries:
+                        raise Exception(f"LaunchDarkly API rate limit exceeded after {max_retries} retries ({method} {path})")
+                    
+                    # Get retry delay from Retry-After header or use exponential backoff
+                    retry_after = None
+                    if hasattr(e, 'response') and e.response is not None:
+                        retry_after = e.response.headers.get('Retry-After')
+                    
+                    if retry_after:
+                        delay = float(retry_after)
+                    else:
+                        delay = base_delay * (2 ** attempt)
+                    
+                    print(f"  ⏳ [LaunchDarkly] Rate limited, waiting {delay:.1f}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    continue
+                
+                # Other errors - don't retry
+                error_msg = str(e)
+                status_code_str = str(status_code) if status_code else ''
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        response_json = e.response.json()
+                        error_msg = response_json.get('message', str(e))
+                        if 'errors' in response_json:
+                            error_msg += f" - Details: {response_json['errors']}"
+                    except Exception:
+                        error_msg = str(e)
+                
+                raise Exception(f"LaunchDarkly API error ({status_code_str} {method} {path}): {error_msg}")
         
-        except requests.exceptions.RequestException as e:
-            error_msg = str(e)
-            status_code = ''
-            if hasattr(e, 'response') and e.response is not None:
-                status_code = str(e.response.status_code)
-                try:
-                    response_json = e.response.json()
-                    error_msg = response_json.get('message', str(e))
-                    if 'errors' in response_json:
-                        error_msg += f" - Details: {response_json['errors']}"
-                except Exception:
-                    error_msg = str(e)
-            
-            raise Exception(f"LaunchDarkly API error ({status_code} {method} {path}): {error_msg}")
+        # Should not reach here, but just in case
+        raise Exception(f"LaunchDarkly API request failed after {max_retries} retries ({method} {path})")
     
     # ==================== Flag Operations ====================
     

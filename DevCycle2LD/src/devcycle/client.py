@@ -73,20 +73,29 @@ class DevCycleClient:
         if not self.access_token or time.time() >= (self.token_expiry or 0):
             self.authenticate()
     
-    def request(self, method: str, path: str, data: Optional[Dict] = None) -> Any:
+    def request(
+        self, 
+        method: str, 
+        path: str, 
+        data: Optional[Dict] = None,
+        max_retries: int = 5,
+        base_delay: float = 1.0
+    ) -> Any:
         """
-        Make an authenticated API request.
+        Make an authenticated API request with rate limit handling.
         
         Args:
             method: HTTP method (GET, POST, etc.)
             path: API endpoint path
             data: Optional request body data
+            max_retries: Maximum number of retries on rate limit (429)
+            base_delay: Base delay in seconds for exponential backoff
         
         Returns:
             Response JSON data
         
         Raises:
-            Exception: If API request fails
+            Exception: If API request fails after all retries
         """
         self._ensure_authenticated()
         
@@ -97,24 +106,52 @@ class DevCycleClient:
         
         url = f"{self.base_url}{path}"
         
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=data if data else None
-            )
-            response.raise_for_status()
-            return response.json()
+        for attempt in range(max_retries + 1):
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=data if data else None
+                )
+                response.raise_for_status()
+                return response.json()
+            
+            except requests.exceptions.RequestException as e:
+                status_code = None
+                if hasattr(e, 'response') and e.response is not None:
+                    status_code = e.response.status_code
+                
+                # Handle rate limiting (429)
+                if status_code == 429:
+                    if attempt >= max_retries:
+                        raise Exception(f"DevCycle API rate limit exceeded after {max_retries} retries ({method} {path})")
+                    
+                    # Get retry delay from header or use exponential backoff
+                    retry_after = None
+                    if hasattr(e, 'response') and e.response is not None:
+                        retry_after = e.response.headers.get('Retry-After')
+                    
+                    if retry_after:
+                        delay = float(retry_after)
+                    else:
+                        delay = base_delay * (2 ** attempt)
+                    
+                    print(f"  ⏳ [DevCycle] Rate limited, waiting {delay:.1f}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    continue
+                
+                # Other errors - don't retry
+                error_msg = str(e)
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        error_msg = e.response.json().get('message', str(e))
+                    except Exception:
+                        error_msg = str(e)
+                raise Exception(f"DevCycle API error ({method} {path}): {error_msg}")
         
-        except requests.exceptions.RequestException as e:
-            error_msg = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_msg = e.response.json().get('message', str(e))
-                except Exception:
-                    error_msg = str(e)
-            raise Exception(f"DevCycle API error ({method} {path}): {error_msg}")
+        # Should not reach here, but just in case
+        raise Exception(f"DevCycle API request failed after {max_retries} retries ({method} {path})")
     
     def get(self, path: str) -> Any:
         """GET request helper."""
