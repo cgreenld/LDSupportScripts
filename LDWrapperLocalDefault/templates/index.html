@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Home - LaunchDarkly Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Welcome to LaunchDarkly Dashboard</h1>
+        <p class="lead">Select a section from the navigation menu to get started.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">LD Information</h5>
+                <p class="card-text">View LaunchDarkly configuration and system information.</p>
+                <a href="/ld-info" class="btn btn-primary">View LD Info</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
