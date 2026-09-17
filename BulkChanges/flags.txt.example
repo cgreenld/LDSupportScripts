@@ -1,0 +1,4 @@
+# Flag keys to enable (one per line)
+# Lines starting with # are ignored
+# my-feature-flag
+# another-flag

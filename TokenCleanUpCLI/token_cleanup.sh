@@ -226,10 +226,20 @@ parse_common_args() {
 }
 
 # Fetch all tokens (paginated). Prints a JSON array of Token objects to stdout.
+# Uses temp files so large accounts do not hit "Argument list too long" (ARG_MAX)
+# when merging pages — common on Git Bash / Windows.
 fetch_all_tokens() {
   local offset=0
-  local all='[]'
   local page=1
+  local tmp_dir acc_file page_file next_file
+  tmp_dir=$(mktemp -d)
+  acc_file="$tmp_dir/all.json"
+  page_file="$tmp_dir/page.json"
+  next_file="$tmp_dir/next.json"
+  echo '[]' > "$acc_file"
+
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp_dir'" RETURN
 
   while true; do
     local query="limit=${LIMIT}&offset=${offset}"
@@ -241,9 +251,13 @@ fetch_all_tokens() {
       return 1
     fi
 
+    printf '%s' "$response" > "$page_file"
+
     local count
-    count=$(echo "$response" | jq '.items | length')
-    all=$(jq -n --argjson acc "$all" --argjson resp "$response" '$acc + $resp.items')
+    count=$(jq '.items | length' "$page_file")
+    # Merge via file args (not --argjson) to stay under OS argv limits
+    jq -s '.[0] + .[1].items' "$acc_file" "$page_file" > "$next_file"
+    mv "$next_file" "$acc_file"
 
     if [[ "$count" -lt "$LIMIT" ]]; then
       break
@@ -252,7 +266,7 @@ fetch_all_tokens() {
     page=$((page + 1))
   done
 
-  echo "$all"
+  cat "$acc_file"
 }
 
 # Filter tokens JSON array by stale rules / type. Prints filtered JSON array.
